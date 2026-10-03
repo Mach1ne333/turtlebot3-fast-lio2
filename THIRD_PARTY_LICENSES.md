@@ -1,0 +1,13 @@
+# Third-party provenance and license notices
+
+This repository is an aggregation of separately licensed components, **not** a single MIT/BSD-licensed codebase. Keep all original copyright and license notices when redistributing or modifying components.
+
+| Component | Origin and tested revision | Files shipped here | License information |
+| --- | --- | --- | --- |
+| Fast-LIO2 | [hku-mars/FAST_LIO](https://github.com/hku-mars/FAST_LIO), branch `ROS2`, `a4743b095409588842a5b30ddfa27e29d2f99164` | Git submodule + `patches/fast_lio2_gazebo.patch` + Gazebo configs/RViz | Upstream root `LICENSE` contains the full **GNU GPL version 2** text; its `package.xml` says `BSD`. Because these statements conflict, **do not describe the whole project as BSD**. Review upstream copyright/licensing before reuse. Source and modification patch are public and retained alongside the pinned submodule. |
+| ikd-Tree | [hku-mars/ikd-Tree](https://github.com/hku-mars/ikd-Tree), `e2e3f4e9d3b95a9e66b1ba83dc98d4a05ed8a3c4` | Nested upstream Git submodule, downloaded with `--recurse-submodules` | Upstream commit did not contain a root `LICENSE` file at packaging time. Check its author/project terms before distributing its code separately; this repository does not vendor the files. |
+| 3D PCD localizer and `interface` | [liangheming/FASTLIO2_ROS2](https://github.com/liangheming/FASTLIO2_ROS2), `7baa59f7339ba88ce3b646fe35b23f61031c5d3f` | `tb3_nav3d_ws/src/FASTLIO2_ROS2_reference/{localizer,interface}/` | Original MIT `LICENSE` retained in **each** of these folders. The localizer contains modifications for this experiment. Its upstream Fast-LIO2 implementation is **not** included or launched. |
+| TurtleBot3 Burger 3D model | [ROBOTIS-GIT/turtlebot3_simulations](https://github.com/ROBOTIS-GIT/turtlebot3_simulations), `a35a56c8b04877dc89772b598084d8ce648a9023` | Independent modified SDF/URDF under `turtlebot3_ws/src/turtlebot3_lio_sim/` | TurtleBot3 upstream is **Apache-2.0**. Original meshes, 2D world and original TurtleBot3 code are *not* redistributed in this repo; `scripts/prepare.sh` retrieves the upstream sources separately. See upstream `LICENSE` for the actual terms. |
+| TurtleBot3 navigation config (source used by optional generator) | [ROBOTIS-GIT/turtlebot3](https://github.com/ROBOTIS-GIT/turtlebot3), `90a68bd2e3c61c12966779da89d8eeaec82730e9` | Derived `tb3_nav3d_ws/config/nav2_3d.yaml` | Upstream is Apache-2.0; changes implement PCD-derived planner map and live PointCloud2 obstacles. |
+
+The included example PCD was produced in the publicly available TurtleBot3 Gazebo simulation world using this experimental stack. It is intended as demonstration data, not proof of safe navigability, robot-level collision safety, or performance on real sensors.

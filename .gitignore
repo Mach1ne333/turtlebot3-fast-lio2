@@ -1,0 +1,31 @@
+# ROS 2 / colcon outputs
+**/build/
+**/install/
+**/log/
+# Official TurtleBot3 packages are external dependencies, not vendored here.
+turtlebot3_ws/src/turtlebot3
+turtlebot3_ws/src/turtlebot3_simulations
+turtlebot3_ws/src/turtlebot3_msgs
+**/__pycache__/
+*.py[cod]
+
+# Generated recordings, logs and large ad-hoc clouds (keep one explicit demo PCD)
+*.db3
+*.mcap
+*.bag
+fast_lio2_ws/maps/*.pcd
+!fast_lio2_ws/maps/tb3_fast_lio2.pcd
+
+# Local publication checklist (not useful to consumers of the repo)
+/PUBLISH_PLAN.md
+
+# Editor/credentials/local machine state
+.vscode/
+.idea/
+.env
+.env.*
+*.pem
+*.key
+*.log
+*~
+.DS_Store

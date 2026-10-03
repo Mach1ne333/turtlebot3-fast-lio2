@@ -1,0 +1,254 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index be3040b..7f3d01d 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -59,7 +59,14 @@ find_package(std_srvs REQUIRED)
+ find_package(visualization_msgs REQUIRED)
+ find_package(pcl_ros REQUIRED)
+ find_package(pcl_conversions REQUIRED)
+-find_package(livox_ros_driver2 REQUIRED)
++# Livox is optional for standard PointCloud2 (e.g. Gazebo) simulation.
++find_package(livox_ros_driver2 QUIET)
++if(livox_ros_driver2_FOUND)
++  add_compile_definitions(FAST_LIO_WITH_LIVOX)
++  message(STATUS "Livox CustomMsg support enabled")
++else()
++  message(STATUS "Livox driver not installed: building PointCloud2-only mode")
++endif()
+ find_package(rosidl_default_generators REQUIRED)
+ 
+ set(dependencies
+@@ -73,8 +80,10 @@ set(dependencies
+   visualization_msgs
+   pcl_ros
+   pcl_conversions
+-  livox_ros_driver2
+ )
++if(livox_ros_driver2_FOUND)
++  list(APPEND dependencies livox_ros_driver2)
++endif()
+ 
+ # Thirdparty libraries
+ find_package(Eigen3 REQUIRED)
+diff --git a/package.xml b/package.xml
+index 8c39e18..5bc36c5 100644
+--- a/package.xml
++++ b/package.xml
+@@ -27,7 +27,7 @@
+   <depend>tf2</depend>
+   <depend>pcl_ros</depend>
+   <depend>pcl_conversions</depend>
+-  <depend>livox_ros_driver2</depend>
++  <!-- Optional at CMake configure time; required only for Livox CustomMsg. -->
+ 
+   <exec_depend>rosidl_default_runtime</exec_depend>
+   <member_of_group>rosidl_interface_packages</member_of_group>
+diff --git a/src/laserMapping.cpp b/src/laserMapping.cpp
+index e5d9950..f522860 100644
+--- a/src/laserMapping.cpp
++++ b/src/laserMapping.cpp
+@@ -39,6 +39,7 @@
+ #include <fstream>
+ #include <csignal>
+ #include <chrono>
++#include <stdexcept>
+ #include <unistd.h>
+ #include <Python.h>
+ #include <so3_math.h>
+@@ -59,7 +60,9 @@
+ #include <tf2_ros/transform_broadcaster.h>
+ #include <geometry_msgs/msg/transform_stamped.hpp>
+ #include <geometry_msgs/msg/vector3.hpp>
++#ifdef FAST_LIO_WITH_LIVOX
+ #include <livox_ros_driver2/msg/custom_msg.hpp>
++#endif
+ #include "preprocess.h"
+ #include <ikd-Tree/ikd_Tree.h>
+ 
+@@ -308,6 +311,7 @@ void standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::UniquePtr msg)
+ 
+ double timediff_lidar_wrt_imu = 0.0;
+ bool   timediff_set_flg = false;
++#ifdef FAST_LIO_WITH_LIVOX
+ void livox_pcl_cbk(const livox_ros_driver2::msg::CustomMsg::UniquePtr msg) 
+ {
+     mtx_buffer.lock();
+@@ -347,6 +351,8 @@ void livox_pcl_cbk(const livox_ros_driver2::msg::CustomMsg::UniquePtr msg)
+     sig_buffer.notify_all();
+ }
+ 
++#endif
++
+ void imu_cbk(const sensor_msgs::msg::Imu::UniquePtr msg_in)
+ {
+     publish_count ++;
+@@ -391,7 +397,13 @@ bool sync_packages(MeasureGroup &meas)
+     {
+         meas.lidar = lidar_buffer.front();
+         meas.lidar_beg_time = time_buffer.front();
+-        if (meas.lidar->points.size() <= 1) // time too little
++        if (p_pre->lidar_type == GAZEBO_INSTANT)
++        {
++            // The Gazebo ray cloud is one instantaneous snapshot at header.stamp.
++            // Never reuse a synthetic scan duration from the spinning-LiDAR modes.
++            lidar_end_time = meas.lidar_beg_time;
++        }
++        else if (meas.lidar->points.size() <= 1) // time too little
+         {
+             lidar_end_time = meas.lidar_beg_time + lidar_mean_scantime;
+             std::cerr << "Too few input point cloud!\n";
+@@ -918,12 +930,16 @@ public:
+             cout << "~~~~"<<ROOT_DIR<<" doesn't exist" << endl;
+ 
+         /*** ROS subscribe initialization ***/
++#ifdef FAST_LIO_WITH_LIVOX
+         if (p_pre->lidar_type == AVIA)
+         {
+             sub_pcl_livox_ = this->create_subscription<livox_ros_driver2::msg::CustomMsg>(lid_topic, 20, livox_pcl_cbk);
+         }
+         else
++#endif
+         {
++            if (p_pre->lidar_type == AVIA)
++                throw std::runtime_error("Livox CustomMsg requested but livox_ros_driver2 was not installed at build time");
+             sub_pcl_pc_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, rclcpp::SensorDataQoS(), standard_pcl_cbk);
+         }
+         sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, 10, imu_cbk);
+@@ -1137,7 +1153,9 @@ private:
+     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubPath_;
+     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu_;
+     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_pcl_pc_;
++#ifdef FAST_LIO_WITH_LIVOX
+     rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr sub_pcl_livox_;
++#endif
+ 
+     std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+     rclcpp::TimerBase::SharedPtr timer_;
+diff --git a/src/preprocess.cpp b/src/preprocess.cpp
+index 9015782..0c4fe12 100644
+--- a/src/preprocess.cpp
++++ b/src/preprocess.cpp
+@@ -1,6 +1,8 @@
+ #include "preprocess.h"
+ 
+ #include <pcl/common/common.h>
++#include <cmath>
++#include <algorithm>
+ 
+ #define RETURN0 0x00
+ #define RETURN0AND1 0x10
+@@ -44,12 +46,15 @@ void Preprocess::set(bool feat_en, int lid_type, double bld, int pfilt_num)
+   point_filter_num = pfilt_num;
+ }
+ 
++#ifdef FAST_LIO_WITH_LIVOX
+ void Preprocess::process(const livox_ros_driver2::msg::CustomMsg::UniquePtr &msg, PointCloudXYZI::Ptr& pcl_out)
+ {
+   avia_handler(msg);
+   *pcl_out = pl_surf;
+ }
+ 
++#endif
++
+ void Preprocess::process(const sensor_msgs::msg::PointCloud2::UniquePtr &msg, PointCloudXYZI::Ptr& pcl_out)
+ {
+   switch (time_unit)
+@@ -73,6 +78,10 @@ void Preprocess::process(const sensor_msgs::msg::PointCloud2::UniquePtr &msg, Po
+ 
+   switch (lidar_type)
+   {
++    case GAZEBO_INSTANT:
++      gazebo_instant_handler(msg);
++      break;
++
+     case OUST64:
+       oust64_handler(msg);
+       break;
+@@ -92,6 +101,33 @@ void Preprocess::process(const sensor_msgs::msg::PointCloud2::UniquePtr &msg, Po
+   *pcl_out = pl_surf;
+ }
+ 
++// Gazebo ray returns one instantaneous scan. Do not invent ring or point timestamps:
++// use the scan header as the common capture time (curvature=0 ms for all points).
++void Preprocess::gazebo_instant_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg)
++{
++  pl_surf.clear();
++  pcl::PointCloud<pcl::PointXYZI> input;
++  pcl::fromROSMsg(*msg, input);
++  pl_surf.reserve(input.size());
++  const int stride = std::max(1, point_filter_num);
++  for (size_t i = 0; i < input.size(); i += stride)
++  {
++    const auto &src = input.points[i];
++    if (!std::isfinite(src.x) || !std::isfinite(src.y) || !std::isfinite(src.z) ||
++        src.x * src.x + src.y * src.y + src.z * src.z <= blind * blind)
++      continue;
++    PointType point;
++    point.x = src.x;
++    point.y = src.y;
++    point.z = src.z;
++    point.intensity = src.intensity;
++    point.normal_x = point.normal_y = point.normal_z = 0.f;
++    point.curvature = 0.f;
++    pl_surf.push_back(point);
++  }
++}
++
++#ifdef FAST_LIO_WITH_LIVOX
+ void Preprocess::avia_handler(const livox_ros_driver2::msg::CustomMsg::UniquePtr &msg)
+ {
+   pl_surf.clear();
+@@ -193,6 +229,8 @@ void Preprocess::avia_handler(const livox_ros_driver2::msg::CustomMsg::UniquePtr
+   }
+ }
+ 
++#endif
++
+ void Preprocess::oust64_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg)
+ {
+   pl_surf.clear();
+diff --git a/src/preprocess.h b/src/preprocess.h
+index d4d6ddc..ef4037c 100644
+--- a/src/preprocess.h
++++ b/src/preprocess.h
+@@ -2,7 +2,9 @@
+ #include <rclcpp/rclcpp.hpp>
+ #include <pcl_conversions/pcl_conversions.h>
+ #include <sensor_msgs/msg/point_cloud2.hpp>
++#ifdef FAST_LIO_WITH_LIVOX
+ #include <livox_ros_driver2/msg/custom_msg.hpp>
++#endif
+ 
+ using namespace std;
+ 
+@@ -16,7 +18,8 @@ enum LID_TYPE
+   AVIA = 1,
+   VELO16,
+   OUST64,
+-  MID360
++  MID360,
++  GAZEBO_INSTANT = 5  // Gazebo ray: simultaneous XYZI points; no ring or per-point time.
+ };  //{1, 2, 3}
+ enum TIME_UNIT
+ {
+@@ -140,7 +143,9 @@ class Preprocess
+   Preprocess();
+   ~Preprocess();
+   
++#ifdef FAST_LIO_WITH_LIVOX
+   void process(const livox_ros_driver2::msg::CustomMsg::UniquePtr &msg, PointCloudXYZI::Ptr &pcl_out);
++#endif
+   void process(const sensor_msgs::msg::PointCloud2::UniquePtr &msg, PointCloudXYZI::Ptr &pcl_out);
+   void set(bool feat_en, int lid_type, double bld, int pfilt_num);
+ 
+@@ -155,7 +160,10 @@ class Preprocess
+   // ros::Publisher pub_full, pub_surf, pub_corn;
+ 
+ private:
++#ifdef FAST_LIO_WITH_LIVOX
+   void avia_handler(const livox_ros_driver2::msg::CustomMsg::UniquePtr &msg);
++#endif
++  void gazebo_instant_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg);
+   void oust64_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg);
+   void velodyne_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg);
+   void mid360_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg);

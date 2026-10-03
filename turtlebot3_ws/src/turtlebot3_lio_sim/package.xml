@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>turtlebot3_lio_sim</name>
+  <version>0.1.0</version>
+  <description>Independent TurtleBot3 Burger with a simulated 16-beam 3D LiDAR and IMU.</description>
+  <maintainer email="lhd@example.com">lhd</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>gazebo_plugins</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>turtlebot3_gazebo</exec_depend>
+  <export>
+    <build_type>ament_cmake</build_type>
+    <gazebo_ros gazebo_model_path="${prefix}/models"/>
+  </export>
+</package>
