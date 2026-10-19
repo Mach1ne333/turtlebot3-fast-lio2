@@ -10,13 +10,7 @@ turtlebot3_ws/src/turtlebot3_msgs
 *.py[cod]
 
 # Local rosbag sessions (including metadata); keep bags/record_qos.yaml.
-/bags/*/
-*.db3
-*.db3-wal
-*.db3-shm
-*.mcap
-*.bag
-*.bag.active
+/bags
 
 # Saved 3D/2D maps (.pcd, .pgm, .png, .yaml) are intentionally versioned.
 # Do not add blanket map-file ignore rules here.
