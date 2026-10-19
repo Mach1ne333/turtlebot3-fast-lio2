@@ -1,0 +1,43 @@
+# Local planar odometry only. AMCL/SLAM, not this EKF, owns map -> odom.
+ekf_filter_node:
+  ros__parameters:
+    use_sim_time: true
+    frequency: 30.0
+    sensor_timeout: 0.2
+    two_d_mode: true
+    publish_tf: true
+    publish_acceleration: false
+    print_diagnostics: true
+    reset_on_time_jump: true
+    transform_time_offset: 0.0
+    transform_timeout: 0.05
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_footprint
+    world_frame: odom
+    use_control: false
+
+    odom0: /wheel/odom
+    # State order: x,y,z, roll,pitch,yaw, vx,vy,vz, vroll,vpitch,vyaw, ax,ay,az.
+    # Do not fuse pose derived from the same wheel data a second time.
+    # vy=0 is the differential-drive nonholonomic constraint.
+    odom0_config: [false, false, false,
+                   false, false, false,
+                   true,  true,  false,
+                   false, false, false,
+                   false, false, false]
+    odom0_queue_size: 10
+    odom0_differential: false
+    odom0_relative: false
+
+    imu0: /imu
+    # Only yaw rate. No world-referenced yaw, gravity or linear acceleration.
+    imu0_config: [false, false, false,
+                  false, false, false,
+                  false, false, false,
+                  false, false, true,
+                  false, false, false]
+    imu0_queue_size: 50
+    imu0_differential: false
+    imu0_relative: false
+    imu0_remove_gravitational_acceleration: false

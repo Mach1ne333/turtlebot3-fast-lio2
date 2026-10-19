@@ -1,0 +1,13 @@
+cmake_minimum_required(VERSION 3.8)
+project(fast_lio_bringup)
+
+find_package(ament_cmake REQUIRED)
+install(DIRECTORY config launch rviz DESTINATION share/${PROJECT_NAME})
+install(PROGRAMS scripts/filter_map_display.py DESTINATION lib/${PROJECT_NAME})
+if(BUILD_TESTING)
+  find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(test_filter_map_display test/test_filter_map_display.py)
+  ament_add_pytest_test(test_lio_rviz_launch test/test_lio_rviz_launch.py)
+  ament_add_pytest_test(test_mapping_launch test/test_mapping_launch.py)
+endif()
+ament_package()

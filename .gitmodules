@@ -1,4 +1,4 @@
-[submodule "fast_lio2_ws/src/FAST_LIO"]
-	path = fast_lio2_ws/src/FAST_LIO
+[submodule "FAST_LIO"]
+	path = mapping_ws/fast_lio2/src/FAST_LIO
 	url = https://github.com/hku-mars/FAST_LIO.git
 	branch = ROS2

@@ -1,0 +1,1118 @@
+diff --git a/fast_planner/CMakeLists.txt b/fast_planner/CMakeLists.txt
+index b3c41fa..23f8536 100644
+--- a/fast_planner/CMakeLists.txt
++++ b/fast_planner/CMakeLists.txt
+@@ -1,52 +1,122 @@
+-cmake_minimum_required(VERSION 3.28)
+-project(fast_planner)
++cmake_minimum_required(VERSION 3.16)
++project(fast_planner VERSION 0.1.0 LANGUAGES CXX)
+ 
+-# 关键：设置编译类型为Debug，生成调试符号
+-set(CMAKE_BUILD_TYPE Debug)  # 优先级最高，强制开启Debug模式
+-set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")  # -g生成调试符号，-O0关闭优化
+-set(CMAKE_CXX_FLAGS_RELEASE "-g -O0")  # 防止误切换到Release模式，仍保留调试符号
++if(NOT CMAKE_CXX_STANDARD)
++  set(CMAKE_CXX_STANDARD 17)
++endif()
++set(CMAKE_CXX_STANDARD_REQUIRED ON)
++set(CMAKE_CXX_EXTENSIONS OFF)
+ 
+-# 查找依赖
+ find_package(ament_cmake REQUIRED)
+ find_package(rclcpp REQUIRED)
+ find_package(nav_msgs REQUIRED)
+ find_package(geometry_msgs REQUIRED)
++find_package(std_msgs REQUIRED)
+ find_package(tf2 REQUIRED)
+ find_package(tf2_ros REQUIRED)
+ find_package(sensor_msgs REQUIRED)
+ find_package(Boost REQUIRED COMPONENTS thread system chrono)
+ find_package(Eigen3 REQUIRED)
+-include_directories(${EIGEN3_INCLUDE_DIR})
+-include_directories(include)
++find_package(NLopt REQUIRED)
+ 
++add_library(fast_planner_core SHARED
++  planner/localmap_esdf/src/sdf_map.cpp
++  planner/trajopt_bspline/src/PlannerInterface.cpp
++  planner/trajopt_bspline/src/bspline_replanner.cpp
++  planner/trajopt_bspline/src/grad_band_optimizer.cpp
++  planner/trajopt_bspline/src/non_uniform_bspline.cpp
++  planner/trajopt_bspline/src/bezier_base.cpp
++)
++
++target_include_directories(fast_planner_core
++  PUBLIC
++    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/planner/localmap_esdf/include>
++    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/planner/trajopt_bspline/include>
++    $<INSTALL_INTERFACE:include>
++)
+ 
+-include_directories(${Boost_INCLUDE_DIRS})
+-include_directories(./planner/localmap_esdf/include)
+-include_directories(./planner/trajopt_bsplane/include)
+-add_subdirectory(planner/localmap_esdf)
+-add_subdirectory(planner/trajopt_bspline)
++target_link_libraries(fast_planner_core
++  PUBLIC
++    Eigen3::Eigen
++    ${NLOPT_LIBRARIES}
++  PRIVATE
++    Boost::thread
++    Boost::system
++    Boost::chrono
++)
++
++target_compile_options(fast_planner_core PRIVATE -Wall -Wextra -Wpedantic)
+ 
+-# 编译节点
+ add_executable(fast_planner_plan src/trajectory_publisher.cpp)
+-ament_target_dependencies(
+-  fast_planner_plan
++target_include_directories(fast_planner_plan PRIVATE include)
++ament_target_dependencies(fast_planner_plan
+   rclcpp
+   nav_msgs
+   geometry_msgs
++  std_msgs
+   tf2
+   tf2_ros
+   sensor_msgs
+ )
++target_link_libraries(fast_planner_plan fast_planner_core)
++
++install(
++  TARGETS fast_planner_core
++  EXPORT export_fast_planner_core
++  ARCHIVE DESTINATION lib
++  LIBRARY DESTINATION lib
++  RUNTIME DESTINATION bin
++  INCLUDES DESTINATION include
++)
+ 
+-target_link_libraries(
+-  fast_planner_plan
+-  trajopt
+-  local_map
++install(
++  TARGETS fast_planner_plan
++  DESTINATION lib/${PROJECT_NAME}
+ )
+ 
+-# 安装节点
+-install(TARGETS
+-  fast_planner_plan
+-  DESTINATION lib/${PROJECT_NAME})
++install(
++  DIRECTORY planner/localmap_esdf/include/
++  DESTINATION include
++)
++
++install(
++  DIRECTORY planner/trajopt_bspline/include/
++  DESTINATION include
++)
++
++install(
++  DIRECTORY include/
++  DESTINATION include/${PROJECT_NAME}
++)
++
++ament_export_targets(export_fast_planner_core HAS_LIBRARY_TARGET)
++ament_export_dependencies(Eigen3 NLopt)
++
++if(BUILD_TESTING)
++  option(FAST_PLANNER_LINT_UPSTREAM "Run style checks on the entire legacy source tree" OFF)
++  if(FAST_PLANNER_LINT_UPSTREAM)
++    find_package(ament_lint_auto REQUIRED)
++    ament_lint_auto_find_test_dependencies()
++  else()
++    # Integration scope: check new tests and maintained package metadata, not
++    # generated ROS 1 headers or unrelated legacy code. Functional tests stay on.
++    find_package(ament_cmake_copyright REQUIRED)
++    find_package(ament_cmake_cpplint REQUIRED)
++    find_package(ament_cmake_uncrustify REQUIRED)
++    find_package(ament_cmake_lint_cmake REQUIRED)
++    find_package(ament_cmake_xmllint REQUIRED)
++    find_package(ament_cmake_cppcheck REQUIRED)
++    ament_copyright(test/)
++    ament_cpplint(test/)
++    ament_uncrustify(test/)
++    ament_lint_cmake(CMakeLists.txt)
++    ament_xmllint(package.xml)
++    # Keep static analysis separate from the approved legacy-style exclusion.
++    ament_cppcheck()
++  endif()
++  find_package(ament_cmake_gtest REQUIRED)
++  ament_add_gtest(test_geometric_planner test/test_geometric_planner.cpp)
++  target_link_libraries(test_geometric_planner fast_planner_core)
++endif()
+ 
+-ament_package()
+\ No newline at end of file
++ament_package()
+diff --git a/fast_planner/package.xml b/fast_planner/package.xml
+index 9cedbce..c065a20 100644
+--- a/fast_planner/package.xml
++++ b/fast_planner/package.xml
+@@ -3,18 +3,25 @@
+ <package format="3">
+   <name>fast_planner</name>
+   <version>0.0.0</version>
+-  <description>TODO: Package description</description>
++  <description>Two-dimensional ESDF and B-Spline trajectory optimization core for ROS 2.</description>
+   <maintainer email="juchunyu@qq.com">juchunyu</maintainer>
+-  <license>TODO: License declaration</license>
++  <license>MIT</license>
+ 
+   <buildtool_depend>ament_cmake</buildtool_depend>
+ 
+   <depend>rclcpp</depend>
+   <depend>nav_msgs</depend>
+   <depend>geometry_msgs</depend>
++  <depend>std_msgs</depend>
+   <depend>tf2</depend>
+   <depend>tf2_ros</depend>
+   <depend>sensor_msgs</depend>
++  <depend>eigen</depend>
++  <depend>libboost-thread-dev</depend>
++  <depend>libboost-system-dev</depend>
++  <depend>libboost-chrono-dev</depend>
++  <depend>libnlopt-cxx-dev</depend>
++  <test_depend>ament_cmake_gtest</test_depend>
+   <test_depend>ament_lint_auto</test_depend>
+   <test_depend>ament_lint_common</test_depend>
+ 
+diff --git a/fast_planner/planner/localmap_esdf/src/sdf_map.cpp b/fast_planner/planner/localmap_esdf/src/sdf_map.cpp
+index 5e18bb6..fe5ba54 100755
+--- a/fast_planner/planner/localmap_esdf/src/sdf_map.cpp
++++ b/fast_planner/planner/localmap_esdf/src/sdf_map.cpp
+@@ -1,4 +1,5 @@
+ #include "sdf_map.h"
++#include <stdexcept>
+ 
+ /* =================================================================
+    1. 初始化与基础转换
+@@ -6,6 +7,17 @@
+ 
+ void SDFMap::initMap(double x_size, double y_size, double z_size, double resolution_, Eigen::Vector3d org, double inflate_values)
+ {
++  const Eigen::Vector3d requested(x_size, y_size, z_size);
++  if (!requested.allFinite() || (requested.array() <= 0).any() || !org.allFinite() ||
++      !std::isfinite(resolution_) || resolution_ <= 0 ||
++      !std::isfinite(inflate_values) || inflate_values < 0 ||
++      inflate_values / resolution_ > 10) {
++    throw std::invalid_argument("Invalid ESDF dimensions/resolution/inflation");
++  }
++  const Eigen::Array3d cells = (requested.array() / resolution_).ceil();
++  if (!cells.isFinite().all() || cells.prod() > 1000000) {
++    throw std::invalid_argument("ESDF exceeds one million cells");
++  }
+   inflate_val_ = inflate_values;
+   ground_z_ = 1.0;
+   resolution = resolution_;
+@@ -40,7 +52,9 @@ void SDFMap::initMap(double x_size, double y_size, double z_size, double resolut
+   fill(distance_buffer_neg.begin(), distance_buffer_neg.end(), 10000.0);
+   fill(distance_buffer_all.begin(), distance_buffer_all.end(), 10000.0);
+ 
+-  std::cout << "ESDF 地图初始化完成!" << std::endl;
++  fill(cache_all_.begin(), cache_all_.end(), 0);
++  fill(cache_hit_.begin(), cache_hit_.end(), 0);
++  while (!cache_voxel_.empty()) cache_voxel_.pop();
+ }
+ 
+ void SDFMap::posToIndex(Eigen::Vector3d pos, Eigen::Vector3i& id)
+@@ -57,8 +71,9 @@ void SDFMap::indexToPos(Eigen::Vector3i id, Eigen::Vector3d& pos)
+ 
+ bool SDFMap::isInMap(Eigen::Vector3d pos)
+ {
+-  if (pos(0) < min_range(0) || pos(1) < min_range(1) || pos(2) < min_range(2) ||
+-      pos(0) > max_range(0) || pos(1) > max_range(1) || pos(2) > max_range(2))
++  if (occupancy_buffer.empty() || !pos.allFinite() ||
++      pos(0) < min_range(0) || pos(1) < min_range(1) || pos(2) < min_range(2) ||
++      pos(0) >= max_range(0) || pos(1) >= max_range(1) || pos(2) >= max_range(2))
+   {
+     return false;
+   }
+@@ -71,6 +86,9 @@ bool SDFMap::isInMap(Eigen::Vector3d pos)
+ 
+ void SDFMap::updateMapRolling(Eigen::Vector3d robot_pos)
+ {
++  if (!robot_pos.allFinite() || occupancy_buffer.empty()) {
++    throw std::invalid_argument("Invalid rolling ESDF pose/map");
++  }
+   Eigen::Vector3d new_origin = robot_pos - map_size / 2.0;
+   
+   for (int i = 0; i < 3; ++i) {
+@@ -120,15 +138,12 @@ void SDFMap::addLaserPoints(Eigen::Vector3d pos, int occ)
+ {
+     if (occ != 1 && occ != 0)
+     {
+-      std::cout << "occ != 1 && occ != " << std::endl;
+-      return;
++      throw std::invalid_argument("Invalid occupancy value");
+     }
+     if (!isInMap(pos)) 
+     {
+-      std::cout << "!isInMap(pos)" << std::endl;
+       return;
+     }
+-    std::cout << "success add laser point" << std::endl;
+     Eigen::Vector3i id;
+     posToIndex(pos, id);
+     int idx_ctns = id(0) * grid_size(1) * grid_size(2) + id(1) * grid_size(2) + id(2);
+@@ -179,10 +194,9 @@ void SDFMap::clearAndInflateLocalMap()
+       {
+         if (occupancy_buffer[x * grid_size(1) * grid_size(2) + y * grid_size(2) + z] > 0)
+         {
+-          // --- 保留原代码对 Z 轴的限制逻辑：投影模式 ---
+-          for (int z1 = 0; z1 <= 50; ++z1)
++          // Extrude the 2D obstacle through every query/interpolation layer.
++          for (int z1 = 0; z1 < grid_size(2); ++z1)
+           {
+-            if (z1 >= grid_size(2)) break;
+ 
+             inflatePoint(Eigen::Vector3i(x, y, z1), inf_step, inf_pts);
+             for (int k = 0; k < (int)inf_pts.size(); ++k)
+@@ -318,8 +332,8 @@ void SDFMap::getObstacleWorldPoints(std::vector<Eigen::Vector3d>& points)
+ template <typename F_get_val, typename F_set_val>
+ void SDFMap::fillESDF(F_get_val f_get_val, F_set_val f_set_val, int start, int end, int dim)
+ {
+-  int v[grid_size(dim)];
+-  double z[grid_size(dim) + 1];
++  std::vector<int> v(grid_size(dim));
++  std::vector<double> z(grid_size(dim) + 1);
+ 
+   int k = start;
+   v[start] = start;
+diff --git a/fast_planner/planner/trajopt_bspline/include/grad_replanner/PlannerInterface.h b/fast_planner/planner/trajopt_bspline/include/grad_replanner/PlannerInterface.h
+index b68a508..424a0d6 100644
+--- a/fast_planner/planner/trajopt_bspline/include/grad_replanner/PlannerInterface.h
++++ b/fast_planner/planner/trajopt_bspline/include/grad_replanner/PlannerInterface.h
+@@ -1,115 +1,61 @@
+ /**
+- * @brief     Trajectory Optimize Base Bspline
+- * @author    juchunyu@qq.com
+- * @date      2025-05-10 17:22:01
+- * @copyright Copyright (c) 2026, Institute of Robotics Planning and Control (irpc). All rights reserved.
++ * @brief Trajectory Optimize Base Bspline
++ * @author juchunyu@qq.com
++ * @copyright Copyright (c) 2026, Institute of Robotics Planning and Control (irpc).
++ * Nav2 integration: explicit geometric result contract, not a timed robot trajectory.
+  */
+ #ifndef _PLANNER_INTERFACE_H_
+ #define _PLANNER_INTERFACE_H_
+ 
+-#include <string>
+-#include <iostream>
+-#include <fstream>
+-#include <math.h>
+-
+-#include <time.h>
+-#include <random>
++#include <chrono>
+ #include <memory>
++#include <string>
++#include <vector>
++#include "grad_replanner/grad_band_optimizer.h"
++#include "grad_replanner/non_uniform_bspline.h"
+ 
+-
+-#include "../quadrotor_msgs/Bspline.h"
+-
+-#include "../grad_replanner/backward.hpp"
+-#include "../grad_replanner/bezier_base.h"
+-
+-#include "../grad_replanner/grad_band_optimizer.h"
+-#include "../grad_replanner/non_uniform_bspline.h"
+-#include "../grad_replanner/bspline_replanner.h"
+-
+-using namespace std;
+-using namespace Eigen;
+-
+-#define INIT_TRAJ_ID 0
+-#define OPT_TRAJ_ID 1
+-#define INIT_PT_ID 2
+-#define OPT_PT_ID 3
+-
+-namespace  Planner
++namespace Planner
+ {
+-    struct PathPoint
+-    {
+-        float x;
+-        float y;
+-        float z;
+-        float v;
+-    };
+-
+-    struct ObstacleInfo
+-    {
+-        float x;
+-        float y;
+-        float z;
+-    };
+-
+-    class PlannerInterface
+-    {
+-
+-
+-        private:
+-
+-            double _MAX_Vel, _MAX_Acc;
+-            int _replan_traj_id = 1;
+-            shared_ptr<SDFMap> _sdf_map;
+-            unique_ptr<BsplineReplanner> _bspline_replanner;
+-            vector<Vector3d> _traj_pts;  
+-            Eigen::MatrixXd ctrl_pts_Vis; 
+-            double _replan_time_length;
+-            int succ_replan_num_;
+-
+-            std::vector<PathPoint> _global_plan_traj_;
+-            std::vector<PathPoint> _plan_traj_results_;
+-
+-            Eigen::Vector3d current_pose_;
+-
+-            bool _on_replan;
+-            quadrotor_msgs::Time _replan_request_time;
+-
+-        public:
+-            PlannerInterface();
+-            ~PlannerInterface();
+-            void initParam(double max_vel,double max_acc);
+-            void initEsdfMap(double x_size,double y_size,double z_size,double resolution_, Eigen::Vector3d org,double inflate_values);
+-            void setCurrentPose(PathPoint pose);
+-            void setPathPoint(std::vector<PathPoint> &plan_traj);
+-            void setObstacles(std::vector<ObstacleInfo> &obstacle);
+-            void makePlan();
+-            void getLocalPlanTrajResults(std::vector<PathPoint> &plan_traj_results);
+-            void getLocalEsdfMap(std::vector<ObstacleInfo> &obstacle);
+-
+-
+-
+-        private:
+-
+-            void gradLocalReplan( const vector<Vector3d> & traj_pts, const double & time_interval, const MatrixXd & vel, const MatrixXd & acc , double local_to_global_time);
+-           
+-            void BsplineFeasibleCheck(NonUniformBspline traj, bool & is_feas, bool & is_safe, Eigen::Vector3d & collision_pt);
+-           
+-            quadrotor_msgs::Bspline getBsplineTraj(NonUniformBspline & traj_opt);
+-            
+-            void getTraj(NonUniformBspline bspline);
+-
+-
+-          
+-        
+-    };
+-
+-
+-}
+-
+-
+-
+-
+-
++struct PathPoint { float x = 0, y = 0, z = 0, v = 0; };
++struct ObstacleInfo { float x = 0, y = 0, z = 0; };
+ 
++enum class PlanStatus { Success, InvalidInput, OptimizationFailed, Collision, Timeout };
++struct GeometricOptions
++{
++  double clearance = 0.15;
++  double obstacle_distance = 0.35;
++  double sample_spacing = 0.025;
++  double parameter_interval = 0.1;  // Internal spline parameter, NOT execution time.
++  size_t max_points = 64;
++  size_t max_obstacles = 10000;
++  size_t max_samples = 4096;
++  int retries = 3;
++};
++
++class PlannerInterface
++{
++public:
++  using Clock = std::chrono::steady_clock;
++  void initParam(double internal_velocity_scale, double internal_acceleration_scale);
++  void initEsdfMap(double x, double y, double z, double resolution,
++    Eigen::Vector3d origin, double inflate);
++  void setCurrentPose(PathPoint pose);
++  void setPathPoint(const std::vector<PathPoint> & path);
++  void setObstacles(const std::vector<ObstacleInfo> & obstacles);
++  PlanStatus makeGeometricPlan(const GeometricOptions & options, Clock::time_point deadline);
++  // Kept for the visual demo. Results are geometric; v is always zero.
++  bool makePlan();
++  void getLocalPlanTrajResults(std::vector<PathPoint> & output) const;
++  void getLocalEsdfMap(std::vector<ObstacleInfo> & output);
++  const std::string & lastError() const { return error_; }
++
++private:
++  std::shared_ptr<SDFMap> map_;
++  double internal_velocity_ = 2.0, internal_acceleration_ = 1.5;
++  Eigen::Vector3d pose_ = Eigen::Vector3d(0, 0, 0.2);
++  std::vector<PathPoint> path_, result_;
++  std::vector<ObstacleInfo> obstacles_;
++  std::string error_;
++};
++}  // namespace Planner
+ #endif
+-
+diff --git a/fast_planner/planner/trajopt_bspline/include/grad_replanner/grad_band_optimizer.h b/fast_planner/planner/trajopt_bspline/include/grad_replanner/grad_band_optimizer.h
+index 8fe645a..bd19bd7 100755
+--- a/fast_planner/planner/trajopt_bspline/include/grad_replanner/grad_band_optimizer.h
++++ b/fast_planner/planner/trajopt_bspline/include/grad_replanner/grad_band_optimizer.h
+@@ -16,6 +16,7 @@
+ // The format of points: N x 3 matrix, each row is a point
+ 
+ class GradBandOptimizer {
++  friend struct OptimizerRegressionAccess;
+  private:
+   /* data */
+   // SDFMap sdf_map;
+@@ -62,7 +63,10 @@ class GradBandOptimizer {
+ 
+   void setOptimizationRange(int start, int end);
+ 
+-  void optimizeTrajFixedEnd();  // NLopt, all at one time, currently use
++  enum class Result { Success, Timeout };
++  // Exceptions propagate to the caller; a timeout is never a successful result.
++  Result optimizeTrajFixedEnd(double max_seconds = 0.05);
++  void setObstacleDistance(double distance);
+   void optimizeTrajFreeEnd();
+   Eigen::MatrixXd getControlPoints();
+ 
+diff --git a/fast_planner/planner/trajopt_bspline/src/PlannerInterface.cpp b/fast_planner/planner/trajopt_bspline/src/PlannerInterface.cpp
+index 1f58c5e..b4ec411 100644
+--- a/fast_planner/planner/trajopt_bspline/src/PlannerInterface.cpp
++++ b/fast_planner/planner/trajopt_bspline/src/PlannerInterface.cpp
+@@ -1,298 +1,170 @@
+-#include "../include/grad_replanner/PlannerInterface.h"
++#include "grad_replanner/PlannerInterface.h"
++#include <algorithm>
++#include <cmath>
++#include <stdexcept>
+ 
+ namespace Planner
+ {
++void PlannerInterface::initParam(double velocity, double acceleration)
++{
++  if (!std::isfinite(velocity) || velocity <= 0 ||
++      !std::isfinite(acceleration) || acceleration <= 0) {
++    throw std::invalid_argument("Invalid internal spline scales");
++  }
++  internal_velocity_ = velocity;
++  internal_acceleration_ = acceleration;
++}
++
++void PlannerInterface::initEsdfMap(double x, double y, double z, double resolution,
++  Eigen::Vector3d origin, double inflate)
++{
++  map_ = std::make_shared<SDFMap>();
++  map_->initMap(x, y, z, resolution, origin, inflate);
++}
+ 
+-    PlannerInterface::PlannerInterface()
+-    {
+-
+-    }
+-
+-    PlannerInterface::~PlannerInterface()
+-    {
+-
+-    }
+-
+-    void PlannerInterface::initParam(double max_vel,double max_acc)
+-    {
+-        _on_replan = true;
+-
+-        succ_replan_num_ = 0;
+-        _MAX_Vel = max_vel;
+-        _MAX_Acc = max_acc;
+-
+-        _bspline_replanner.reset(new BsplineReplanner());
+-        _bspline_replanner->initialize(_MAX_Vel, _MAX_Acc);
+-
+-    }
+-    
+-    void PlannerInterface::initEsdfMap(double x_size,double y_size,double z_size,double resolution_, Eigen::Vector3d origin,double inflate_values)
+-    {
+-        _sdf_map.reset(new SDFMap);
+-        _sdf_map->initMap(x_size,y_size,z_size,resolution_,origin,inflate_values);
+-    }
+-
+-    void PlannerInterface::setCurrentPose(PathPoint pose)
+-    {
+-        current_pose_[0] = pose.x;
+-        current_pose_[1] = pose.y;
+-        current_pose_[2] = 0.2;
+-    }
+-
+-
+-    void PlannerInterface::setPathPoint(std::vector<PathPoint> &plan_traj)
+-    {
+-        _global_plan_traj_.clear();
+-        _global_plan_traj_ = plan_traj;
+-    }
+-    
+-    void PlannerInterface::setObstacles(std::vector<ObstacleInfo> &obstacle)
+-    {
+-        _sdf_map->updateMapRolling(current_pose_);
+-        for(int i = 0; i < obstacle.size();i++)
+-        {
+-            Eigen::Vector3d obstacle_pos;
+-            obstacle_pos[0] = obstacle[i].x;
+-            obstacle_pos[1] = obstacle[i].y;
+-            obstacle_pos[2] = 0.2;
+-            _sdf_map->addLaserPoints(obstacle_pos, 1);
+-        }
+-
+-        _sdf_map->startUpdateMapInfo(current_pose_);
+-    }
+-
+-
+-    void PlannerInterface::getLocalEsdfMap(std::vector<ObstacleInfo> &obstacle)
+-    {
+-        std::vector<Eigen::Vector3d> points;
+-        _sdf_map->getObstacleWorldPoints(points);
+-        for(int i = 0;i < points.size();i++)
+-        {
+-            Eigen::Vector3d obs = points[i];
+-            ObstacleInfo temp;
+-            temp.x = obs[0];
+-            temp.y = obs[1];
+-            obstacle.push_back(temp);
+-        }
+-    }
+-
+-    void PlannerInterface::makePlan()
+-    {
+-    
+-        vector<Eigen::Vector3d> traj_pts;
+-
+-        for(int i = 0; i< _global_plan_traj_.size();i++)
+-        {
+-            Vector3d plan_pt(_global_plan_traj_[i].x,_global_plan_traj_[i].y,0.2);
+-            traj_pts.push_back(plan_pt);
+-        }
+-
+-        MatrixXd acc(2, 3), vel(2, 3);
+-
+-        Vector3d start_vel(0.0 ,0, 0);
+-        Vector3d target_vel(0.0,0, 0);
+-
+-        Vector3d start_acc(0.0, 0.0, 0.0);
+-        Vector3d target_acc(0.0, 0.0,  0.0);
+-
+-        vel.row(0) = start_vel;
+-        vel.row(1) = target_vel;
+-
+-        acc.row(0) = start_acc;
+-        acc.row(1) = target_acc;
+-
+-        double plan_time_interval  = 0.1;
+-        double check_time_interval = 0.1;
+-        double local_to_global_time = 0;
+-
+-        auto start = std::chrono::system_clock::now();
+-
+-        gradLocalReplan(traj_pts, plan_time_interval, vel, acc, local_to_global_time);
+-
+-        auto end = std::chrono::system_clock::now();
+-
+-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+-        printf("MotionPlanner Total Running Time: %d  ms \n", elapsed.count());
+-    }
++void PlannerInterface::setCurrentPose(PathPoint pose) { pose_ = {pose.x, pose.y, 0.2}; }
++void PlannerInterface::setPathPoint(const std::vector<PathPoint> & path)
++{
++  result_.clear();
++  path_ = path;
++}
++void PlannerInterface::setObstacles(const std::vector<ObstacleInfo> & obstacles)
++{
++  result_.clear();
++  obstacles_ = obstacles;  // ESDF work occurs inside the budgeted planning call.
++}
++void PlannerInterface::getLocalPlanTrajResults(std::vector<PathPoint> & output) const
++{
++  output = result_;
++}
++void PlannerInterface::getLocalEsdfMap(std::vector<ObstacleInfo> & output)
++{
++  output.clear();
++  if (!map_) return;
++  std::vector<Eigen::Vector3d> points;
++  map_->getObstacleWorldPoints(points);
++  for (const auto & p : points) {
++    output.push_back({static_cast<float>(p.x()), static_cast<float>(p.y()),
++      static_cast<float>(p.z())});
++  }
++}
++
++bool PlannerInterface::makePlan()
++{
++  return makeGeometricPlan(GeometricOptions{}, Clock::now() + std::chrono::milliseconds(80)) ==
++    PlanStatus::Success;
++}
+ 
+-    void PlannerInterface::getLocalPlanTrajResults(std::vector<PathPoint> &plan_traj_results)
+-    {
+-        plan_traj_results = _plan_traj_results_;
++PlanStatus PlannerInterface::makeGeometricPlan(
++  const GeometricOptions & options, Clock::time_point deadline)
++{
++  result_.clear();
++  error_.clear();
++  auto fail = [this](PlanStatus status, const std::string & message) {
++      result_.clear();
++      error_ = message;
++      return status;
++    };
++  if (Clock::now() >= deadline) return fail(PlanStatus::Timeout, "Planning budget exhausted");
++  if (!map_ || !pose_.allFinite() || path_.size() < 5 || path_.size() > options.max_points ||
++      obstacles_.size() > options.max_obstacles || options.retries < 1 || options.retries > 5 ||
++      options.max_points > 256 || options.max_samples < 2 || options.max_samples > 16384 ||
++      !std::isfinite(options.clearance) || options.clearance <= 0 ||
++      !std::isfinite(options.obstacle_distance) || options.obstacle_distance < options.clearance ||
++      !std::isfinite(options.sample_spacing) || options.sample_spacing <= 0 ||
++      !std::isfinite(options.parameter_interval) || options.parameter_interval <= 0) {
++    return fail(PlanStatus::InvalidInput, "Invalid geometric planning input/options");
++  }
++  std::vector<Eigen::Vector3d> points;
++  double length = 0;
++  for (const auto & p : path_) {
++    if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) {
++      return fail(PlanStatus::InvalidInput, "Non-finite path");
+     }
+-
+-    void PlannerInterface::gradLocalReplan( const vector<Vector3d> & traj_pts, const double & time_interval, const MatrixXd & vel, const MatrixXd & acc , double local_to_global_time)
+-    {
+-        /* generate sample points set on a naive trajectory*/
+-        vector<Eigen::Vector3d> start_end_derivative;
+-        start_end_derivative.push_back(vel.row(0));
+-        start_end_derivative.push_back(vel.row(1));
+-        start_end_derivative.push_back(acc.row(0));
+-        start_end_derivative.push_back(acc.row(1));
+-
+-        Eigen::MatrixXd pos_v(2, 3);
+-        Eigen::MatrixXd vel_v = vel;
+-        Eigen::MatrixXd acc_v = acc;
+-
+-        pos_v.row(0) = traj_pts.front();
+-        pos_v.row(1) = traj_pts.back();
+-        
+-        for(int i = 0;i < traj_pts.size();i++)
+-        {
+-            std::cout << traj_pts[i] << std::endl;
+-        }
+-
+-        /* ========================================================================== */
+-        _bspline_replanner->setInput(_sdf_map, time_interval, traj_pts, start_end_derivative);
+-        _bspline_replanner->resetLambda2();
+-        bool traj_feas = false;
+-        bool traj_safe = false;
+-        Eigen:Vector3d collision_pt;
+-        NonUniformBspline traj_opt;
+-
+-        Eigen::MatrixXd ctrl_pts;
+-        NonUniformBspline::BsplineParameterize(time_interval, traj_pts,
+-                                            start_end_derivative, ctrl_pts);
+-        ctrl_pts_Vis = ctrl_pts;
+-        ctrl_pts_Vis = ctrl_pts;
+-        int iter = 0;
+-        while (iter < 5)
+-        {
+-            if (traj_feas && traj_safe) 
+-                break;
+-            
+-            /* ---------- call replanning ---------- */
+-            _bspline_replanner->optimize(true);
+-            traj_opt = _bspline_replanner->getTraj();
+-            BsplineFeasibleCheck(traj_opt, traj_feas, traj_safe, collision_pt);
+-
+-            /* ---------- fill local minima; enlarge lambda2 ---------- */
+-            if (!traj_safe)
+-            {
+-                _bspline_replanner->renewLambda2(0.05);
+-            }
+-
+-            iter++;
+-        }
+-        
+-        traj_safe = true;
+-
+-        if( traj_safe )
+-        { 
+-            quadrotor_msgs::Bspline safe_spline = getBsplineTraj(traj_opt);
+-            double t_bspline_cmd_start, t_bspline_cmd_end;
+-            traj_opt.getRegion(t_bspline_cmd_start, t_bspline_cmd_end);
+-
+-            double replan_traj_time = t_bspline_cmd_end - t_bspline_cmd_start;
+-            double time_extra = replan_traj_time - _replan_time_length;
+-
+-            safe_spline.time_extra = time_extra;
+-            safe_spline.replan_to_global_time = local_to_global_time;
+-
+-            _on_replan = true;
+-
+-            getTraj(traj_opt);
+-            succ_replan_num_ += 3;
+-        }
+-        else{
+-            // do nothing
+-            cout<<"no safe replan, try it in next loop"<<endl;
+-        }
+-
++    Eigen::Vector3d next(p.x, p.y, 0.2);
++    if (!points.empty()) {
++      const double distance = (next - points.back()).norm();
++      if (distance < 1e-7) return fail(PlanStatus::InvalidInput, "Duplicate path points");
++      length += distance;
+     }
+-
+-    void PlannerInterface::BsplineFeasibleCheck(NonUniformBspline traj, bool & is_feas, bool & is_safe, Eigen::Vector3d & collision_pt)
+-    {
+-        Vector3d pos, vel, acc;
+-        double t_bspline_start, t_bspline_end, t_duration;
+-        NonUniformBspline vel_traj = traj.getDerivative();  
+-        NonUniformBspline acc_traj = vel_traj.getDerivative();  
+-
+-        traj.getRegion(t_bspline_start, t_bspline_end);   
+-        t_duration = t_bspline_end - t_bspline_start;
+-
+-        is_safe = true;
+-        is_feas = true;
+-        collision_pt.setZero();
+-            
+-        Eigen::Vector3d grad;
+-        double dis;
+-        for(double t = 0.0; t < t_duration; t += 0.05)
+-        {
+-            pos =     traj.evaluateDeBoor(t_bspline_start + t);
+-            vel = vel_traj.evaluateDeBoor(t_bspline_start + t);
+-            acc = acc_traj.evaluateDeBoor(t_bspline_start + t);
+-
+-            for(int i = 0; i < 3; i++)
+-            {
+-                if( fabs(vel(i)) > _MAX_Vel || fabs(acc(i)) > _MAX_Acc )
+-                    is_feas = false;
+-            }
+-            
+-            dis = _sdf_map->getDistWithGradTrilinear(pos,  grad );
+-            
+-            if( dis <  0.075 )
+-            {
+-                    is_safe = false;
+-                    if(collision_pt.norm() < 1e-5) collision_pt = pos;
+-            }
+-        }
+-
++    points.push_back(next);
++  }
++  if (length < 1e-5) return fail(PlanStatus::InvalidInput, "Zero-length path");
++  for (const auto & p : obstacles_) {
++    if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) {
++      return fail(PlanStatus::InvalidInput, "Non-finite obstacle");
+     }
+-
+-    quadrotor_msgs::Bspline PlannerInterface::getBsplineTraj(NonUniformBspline & traj_opt)
+-    {
+-        quadrotor_msgs::Bspline bspline;
+-        bspline.order = 3;
+-
+-        bspline.start_time = _replan_request_time;
+-        bspline.traj_id    = _replan_traj_id ++;
+-
+-        Eigen::MatrixXd ctrl_pts = traj_opt.getControlPoint();
+-
+-        for (int i = 0; i < ctrl_pts.rows(); ++i) 
+-        {
+-            Eigen::Vector3d pvt = ctrl_pts.row(i);
+-            geometry_msgs::Point pt;
+-            pt.x = pvt(0);
+-            pt.y = pvt(1);
+-            pt.z = pvt(2);
+-            bspline.pts.push_back(pt);
+-        }
+-        std::cout << "  bspline.pts size =" <<  bspline.pts.size() << std::endl;
+-
+-        Eigen::VectorXd knots = traj_opt.getKnot();
+-
+-        for (int i = 0; i < knots.rows(); ++i) 
+-        {
+-            bspline.knots.push_back(knots(i));
+-        }
+-        std::cout << "   knots size =" <<  knots.size() << std::endl;
+-
+-        return bspline;
++  }
++
++  try {
++    map_->updateMapRolling(pose_);
++    for (const auto & p : obstacles_) map_->addLaserPoints({p.x, p.y, 0.2}, 1);
++    map_->startUpdateMapInfo(pose_);
++    if (Clock::now() >= deadline) return fail(PlanStatus::Timeout, "ESDF budget exhausted");
++    Eigen::MatrixXd controls;
++    std::vector<Eigen::Vector3d> derivatives(4, Eigen::Vector3d::Zero());
++    NonUniformBspline::BsplineParameterize(
++      options.parameter_interval, points, derivatives, controls);
++    if (controls.rows() <= 6 || controls.cols() != 3 || !controls.allFinite()) {
++      return fail(PlanStatus::InvalidInput, "Invalid spline parameterization");
+     }
+-
+-    void PlannerInterface::getTraj(NonUniformBspline bspline)
+-    {
+-        vector<Eigen::Vector3d> traj_pts;
+-        double tm, tmp;
+-        bspline.getRegion(tm, tmp);
+-
+-        NonUniformBspline vel_traj = bspline.getDerivative();  
+-        NonUniformBspline acc_traj = vel_traj.getDerivative();  
+-        _plan_traj_results_.clear();
+-        for (double t = tm; t <= tmp; t += 0.01) 
+-        {
+-            Eigen::Vector3d pt = bspline.evaluateDeBoor(t);
+-            Vector3d  vel = vel_traj.evaluateDeBoor(t);
+-            traj_pts.push_back(pt);
+-
+-            PathPoint temp;
+-            temp.x = pt[0];
+-            temp.y = pt[1];
+-            temp.z = pt[2];
+-            temp.v =  sqrt(pow(vel[0],2) + pow(vel[1],2));
+-            _plan_traj_results_.push_back(temp);
++    // Enforce the planar seed exactly; a vertically extruded ESDF has zero Z gradient.
++    controls.col(2).setConstant(0.2);
++    GradBandOptimizer optimizer;
++    optimizer.setParameterAuto(internal_velocity_, internal_acceleration_);
++    optimizer.setObstacleDistance(options.obstacle_distance);
++    optimizer.setDistanceField(map_);
++    optimizer.setBSplineInterval(options.parameter_interval);
++    optimizer.resetLambda2();
++    for (int attempt = 0; attempt < options.retries; ++attempt) {
++      optimizer.setControlPoints(controls);
++      const double remaining = std::chrono::duration<double>(deadline - Clock::now()).count();
++      if (remaining <= 0 || optimizer.optimizeTrajFixedEnd(remaining) ==
++          GradBandOptimizer::Result::Timeout) {
++        return fail(PlanStatus::Timeout, "Optimization budget exhausted");
++      }
++      controls = optimizer.getControlPoints();
++      if (!controls.allFinite() || (controls.col(2).array() - 0.2).abs().maxCoeff() > 1e-6) {
++        return fail(PlanStatus::OptimizationFailed, "Non-finite or non-planar spline");
++      }
++      NonUniformBspline spline(controls, 3, options.parameter_interval);
++      const auto derivative = spline.getDerivative().getControlPoint();
++      double max_derivative = 0;
++      for (int row = 0; row < derivative.rows(); ++row) {
++        max_derivative = std::max(max_derivative, derivative.row(row).norm());
++      }
++      double begin, end;
++      spline.getRegion(begin, end);
++      const double count = std::ceil((end - begin) * max_derivative / options.sample_spacing);
++      if (!std::isfinite(count) || count > options.max_samples - 1 || end <= begin) {
++        return fail(PlanStatus::OptimizationFailed, "Spline sampling exceeds bounds");
++      }
++      const size_t segments = std::max<size_t>(1, static_cast<size_t>(count));
++      std::vector<PathPoint> candidate;
++      bool safe = true;
++      for (size_t i = 0; i <= segments; ++i) {
++        if (Clock::now() >= deadline) return fail(PlanStatus::Timeout, "Sampling budget exhausted");
++        const Eigen::Vector3d p = spline.evaluateDeBoor(begin + (end - begin) * i / segments);
++        Eigen::Vector3d gradient;
++        const double distance = map_->getDistWithGradTrilinear(p, gradient);
++        if (!p.allFinite() || !std::isfinite(distance)) {
++          return fail(PlanStatus::OptimizationFailed, "Non-finite spline result");
+         }
++        // Distance is 1-Lipschitz; half the sampling step covers the gaps.
++        if (distance < options.clearance + options.sample_spacing * 0.5) safe = false;
++        candidate.push_back({static_cast<float>(p.x()), static_cast<float>(p.y()),
++          static_cast<float>(p.z()), 0.0f});
++      }
++      if (safe) {
++        if (Clock::now() >= deadline) return fail(PlanStatus::Timeout, "Result expired");
++        result_ = std::move(candidate);
++        return PlanStatus::Success;
++      }
++      optimizer.renewLambda2(0.05);
+     }
+-
+-}
+\ No newline at end of file
++    return fail(PlanStatus::Collision, "No collision-free geometric result");
++  } catch (const std::exception & e) {
++    return fail(PlanStatus::OptimizationFailed, e.what());
++  }
++}
++}  // namespace Planner
+diff --git a/fast_planner/planner/trajopt_bspline/src/bspline_replanner.cpp b/fast_planner/planner/trajopt_bspline/src/bspline_replanner.cpp
+index 8988365..777c174 100644
+--- a/fast_planner/planner/trajopt_bspline/src/bspline_replanner.cpp
++++ b/fast_planner/planner/trajopt_bspline/src/bspline_replanner.cpp
+@@ -54,7 +54,9 @@ bool BsplineReplanner::optimize(bool adjust_time) {
+ 
+   // std::cout << "optimizeTrajFixedEnd() 11" << std::endl;
+ 
+-  traj_optimizer->optimizeTrajFixedEnd();
++  if (traj_optimizer->optimizeTrajFixedEnd() != GradBandOptimizer::Result::Success) {
++    return false;
++  }
+ 
+   // std::cout << "optimizeTrajFixedEnd() 22" << std::endl;
+ 
+@@ -64,7 +66,7 @@ bool BsplineReplanner::optimize(bool adjust_time) {
+   
+   // std::cout << "optimizeTrajFixedEnd() 33" << std::endl;
+   /* ---------- time adjustment ---------- */
+-  bool feasible;
++  bool feasible = true;
+   if (adjust_time) {
+     traj_opt.setDynamicsLimit(vel_limit, acc_limit);
+     feasible = traj_opt.checkFeasibility();
+@@ -91,11 +93,13 @@ bool BsplineReplanner::optimize(bool adjust_time) {
+     /* recompute segment num */
+     double length = getTrajLength(traj_opt.getControlPoint());
+     // std::cout << "length =" << length << std::endl;
++    if (!std::isfinite(length_ori) || length_ori <= 1e-9) return false;
+     num_seg_opt = double(num_seg_ori) * length / length_ori;
+     // cout << "ori:" << num_seg_ori << ", opt:" << num_seg_opt << endl;
+   }
+   // std::cout << "optimizeTrajFixedEnd() 441" << std::endl;
+ 
++  if (num_seg_opt <= 0 || !std::isfinite(duration) || duration <= 0) return false;
+   delta_t = duration / double(num_seg_opt);
+   // std::cout << "optimizeTrajFixedEnd() 442" << std::endl;
+ 
+diff --git a/fast_planner/planner/trajopt_bspline/src/grad_band_optimizer.cpp b/fast_planner/planner/trajopt_bspline/src/grad_band_optimizer.cpp
+index cf483a0..6c14900 100755
+--- a/fast_planner/planner/trajopt_bspline/src/grad_band_optimizer.cpp
++++ b/fast_planner/planner/trajopt_bspline/src/grad_band_optimizer.cpp
+@@ -79,8 +79,7 @@ void GradBandOptimizer::setParameterAuto(double max_v, double max_a) {
+   // f_combine = opt->lamda1 * f_curvature + opt->lamda2 * f_dist +
+   //             opt->lamda3 * (f_exp_vel + f_exp_acc);
+ 
+-  cout<<"MAX Velocity := "    <<max_vel<<endl;
+-  cout<<"MAX Acceleration := "<<max_acc<<endl;
++
+ }
+ 
+ void GradBandOptimizer::renewLambda1(double lamda1_) { lamda1_init += lamda1_; }
+@@ -89,8 +88,7 @@ void GradBandOptimizer::renewLambda2(double lamda2_) { lamda2 += lamda2_; }
+ 
+ void GradBandOptimizer::resetLambda2()
+ {
+-  //ros::param::get("/local_replanner/lamda2", lamda2);
+-//  cout << "reset lamda2: " << lamda2 << endl;
++  lamda2 = 20.0;
+ }
+ 
+ void GradBandOptimizer::setBSplineInterval(double ts) {
+@@ -113,19 +111,30 @@ Eigen::MatrixXd GradBandOptimizer::getControlPoints() {
+ 
+ /* best algorithm is 40: SLSQP(constrained), 11 LBFGS(unconstrained barrier
+ method */
+-void GradBandOptimizer::optimizeTrajFixedEnd() {
++void GradBandOptimizer::setObstacleDistance(double distance) {
++  if (!std::isfinite(distance) || distance <= 0.0) {
++    throw std::invalid_argument("Invalid optimizer obstacle distance");
++  }
++  dist0 = distance;
++}
++
++GradBandOptimizer::Result GradBandOptimizer::optimizeTrajFixedEnd(double max_seconds) {
+ 
+   // this->variable_num = 3 * (control_points.rows() - 2 * order);
+   this->variable_num = 3 * (end_id - start_id);
+ 
+-  // std::cout << "endid =" << end_id << " start_id" << start_id << std::endl;
++  if (!std::isfinite(max_seconds) || max_seconds <= 0.0) return Result::Timeout;
++  if (!sdf_map || variable_num <= 0 || !control_points.allFinite() ||
++      !std::isfinite(bspline_interval) || bspline_interval <= 0.0) {
++    throw std::invalid_argument("Invalid fixed-end optimization input");
++  }
++  this->best_variable.clear();
+   this->min_cost = std::numeric_limits<double>::max();
+   nlopt::opt opt(nlopt::algorithm(algorithm), this->variable_num);
+   opt.set_min_objective(GradBandOptimizer::costFuncMinCurvaturePara, this);
+-  //opt.set_min_objective(GradBandOptimizer::costFuncMinJerkPara, this);
+   opt.set_maxeval(max_iteration_num);
+-  // opt.set_maxtime(1e-2);
+-  // opt.set_xtol_rel(1e-4);
++  opt.set_maxtime(max_seconds);
++  opt.set_xtol_rel(1e-6);
+ 
+   vector<double> q(this->variable_num);
+   double final_cost;
+@@ -144,6 +153,13 @@ void GradBandOptimizer::optimizeTrajFixedEnd() {
+     vec_cost.clear();
+     time_start =  quadrotor_msgs::Time::now();//ros::Time::now();
+     nlopt::result result = opt.optimize(q, final_cost);
++    if (result == nlopt::MAXTIME_REACHED) return Result::Timeout;
++    if (result < 0 || !std::isfinite(final_cost) || best_variable.size() != q.size()) {
++      throw std::runtime_error("Invalid optimizer result");
++    }
++    for (double value : best_variable) {
++      if (!std::isfinite(value)) throw std::runtime_error("Non-finite optimizer output");
++    }
+ 
+     //STCY << "Min cost:" << min_cost << REC;
+     for (int i = 0; i < control_points.rows(); ++i) {
+@@ -153,9 +169,10 @@ void GradBandOptimizer::optimizeTrajFixedEnd() {
+       control_points(i, 2) = this->best_variable[2 + 3 * (i - start_id)];
+     }
+ 
+-    // SETCY << "[gradient elastic-band]:end-------------" << REC;
+-  } catch (std::exception& e) {
+-    SETR << "[Grad band]: nlopt fail: " << e.what() << REC;
++    return Result::Success;
++  } catch (const std::exception&) {
++    best_variable.clear();
++    throw;
+   }
+ 
+   // /* add contrains */
+@@ -286,17 +303,16 @@ double GradBandOptimizer::costFuncMinCurvaturePara(const std::vector<double>& x,
+     double f2 = 0.0;
+     if (dist < opt->dist0)
+     {
+-      // std::cout << "getDistanceAndGradient dist =" << dist << "grad ="  << dist_grad << std::endl;
+       f2 = pow(dist - opt->dist0, 2);
+     }
+     f_dist += f2;
+ 
+-    /* only constrain the first few points */
+-    static double vm = opt->max_vel, am = opt->max_acc,
+-                  ts = opt->bspline_interval;
+-    static double vm2 = vm * vm;
+-    static double am2 = am * am;
+-    static double ts_inv = 1 / ts;
++    // These values belong to this call, not the first optimizer instance.
++    const double vm = opt->max_vel, am = opt->max_acc,
++                 ts = opt->bspline_interval;
++    const double vm2 = vm * vm;
++    const double am2 = am * am;
++    const double ts_inv = 1 / ts;
+     Eigen::Vector3d q32;
+     Eigen::Vector3d q21;
+     Eigen::Vector3d q132;
+@@ -354,7 +370,7 @@ double GradBandOptimizer::costFuncMinCurvaturePara(const std::vector<double>& x,
+       for (int j = 0; j < 3; ++j) {
+         cona243[j] =
+             q243(j) * q243(j) * ts_inv * ts_inv * ts_inv * ts_inv - am2;
+-        if (cona243[j]) fa += pow(cona243[j], 2);
++        if (cona243[j] > 0.0) fa += pow(cona243[j], 2);
+       }
+       f_exp_acc += fa;
+     }
+diff --git a/fast_planner/planner/trajopt_bspline/src/non_uniform_bspline.cpp b/fast_planner/planner/trajopt_bspline/src/non_uniform_bspline.cpp
+index 49a244d..dfe6126 100755
+--- a/fast_planner/planner/trajopt_bspline/src/non_uniform_bspline.cpp
++++ b/fast_planner/planner/trajopt_bspline/src/non_uniform_bspline.cpp
+@@ -14,7 +14,7 @@ NonUniformBspline::NonUniformBspline(Eigen::MatrixXd points, int order,
+   // calculate knots vector
+   this->interval = interval;
+   this->u = Eigen::VectorXd::Zero(this->m + 1);
+-  std::cout << "this->m + 1 =" << this->m + 1 << std::endl;
++
+   for (int i = 0; i <= this->m; ++i) {
+     if (i <= this->p)
+       this->u(i) = double(-this->p + i) * this->interval;

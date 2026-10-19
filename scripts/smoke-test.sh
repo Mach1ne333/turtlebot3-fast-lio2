@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # Isolated headless integration test; run only when no other Gazebo is active.
 set -eo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-source /opt/ros/humble/setup.bash
-source "$ROOT/turtlebot3_ws/install/setup.bash"
-source "$ROOT/fast_lio2_ws/install/setup.bash"
-source "$ROOT/tb3_nav3d_ws/install/setup.bash"
+source "$(dirname "${BASH_SOURCE[0]}")/humble-base-env.bash"
+source "$TB3_SIM_WS/install/local_setup.bash"
+source "$TB3_LIO_WS/install/local_setup.bash"
+source "$TB3_NAV_WS/install/local_setup.bash"
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-62}"
 export GAZEBO_MASTER_URI="${GAZEBO_MASTER_URI:-http://127.0.0.1:11445}"
 export GAZEBO_MODEL_DATABASE_URI=""
@@ -30,13 +29,15 @@ cleanup() {
   done
 }
 trap cleanup EXIT
-setsid "$ROOT/turtlebot3_ws/start-world.sh" 3d-nav gui:=false > "$LOGDIR/world.log" 2>&1 & world=$!
+# The bundled PCD/grid match the system-installed official world, not the
+# launcher's current default building. Keep this test's scene/map pair fixed.
+setsid "$TB3_SIM_WS/start-world.sh" 3d-nav scene:=turtlebot3_world gui:=false > "$LOGDIR/world.log" 2>&1 & world=$!
 for n in $(seq 1 35); do
   if timeout 5 ros2 topic list | grep -qx /points_raw; then break; fi
   sleep 2
 done
 timeout 6 ros2 topic list | grep -qx /points_raw || { echo 'No 3D point cloud'; exit 1; }
-setsid "$ROOT/tb3_nav3d_ws/start-navigation.sh" > "$LOGDIR/navigation.log" 2>&1 & nav=$!
+setsid "$TB3_NAV_WS/start-navigation.sh" > "$LOGDIR/navigation.log" 2>&1 & nav=$!
 for n in $(seq 1 35); do
   if timeout 6 ros2 service list | grep -qx /pcd_localizer/relocalize; then break; fi
   sleep 2
@@ -66,7 +67,7 @@ for name in map_server controller_server planner_server bt_navigator; do
 done
 echo '3D PCD ICP valid: Nav2 map/planner/controller/BT active'
 # A goal result by itself is not proof of movement; compare actual odometry.
-setsid python3 "$ROOT/tb3_nav3d_ws/tools/observe_motion.py" 120 > "$LOGDIR/motion.log" 2>&1 & observer=$!
+setsid python3 "$TB3_NAV_WS/tools/observe_motion.py" 120 > "$LOGDIR/motion.log" 2>&1 & observer=$!
 sleep 4
 timeout 120 ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
   '{pose: {header: {frame_id: map}, pose: {position: {x: 0.8, y: 0.0, z: 0.0}, orientation: {w: 1.0}}}}' > "$LOGDIR/goal.log" 2>&1

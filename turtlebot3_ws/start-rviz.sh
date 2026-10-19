@@ -8,10 +8,10 @@ export TURTLEBOT3_MODEL=burger
 MODE="${1:-2d}"
 case "$MODE" in
   2d)
-    CONFIG="$WS/src/turtlebot3_simulations/turtlebot3_gazebo/rviz/tb3_gazebo.rviz"
+    CONFIG="$(ros2 pkg prefix --share turtlebot3_gazebo)/rviz/tb3_gazebo.rviz"
     ;;
   3d)
-    CONFIG="$WS/src/turtlebot3_lio_sim/rviz/tb3_lidar3d.rviz"
+    CONFIG="$(ros2 pkg prefix --share tb3_sim)/rviz/tb3_lidar3d.rviz"
     ;;
   *)
     echo "Usage: $0 [2d|3d]" >&2

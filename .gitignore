@@ -9,12 +9,17 @@ turtlebot3_ws/src/turtlebot3_msgs
 **/__pycache__/
 *.py[cod]
 
-# Generated recordings, logs and large ad-hoc clouds (keep one explicit demo PCD)
+# Local rosbag sessions (including metadata); keep bags/record_qos.yaml.
+/bags/*/
 *.db3
+*.db3-wal
+*.db3-shm
 *.mcap
 *.bag
-fast_lio2_ws/maps/*.pcd
-!fast_lio2_ws/maps/tb3_fast_lio2.pcd
+*.bag.active
+
+# Saved 3D/2D maps (.pcd, .pgm, .png, .yaml) are intentionally versioned.
+# Do not add blanket map-file ignore rules here.
 
 # Local publication checklist (not useful to consumers of the repo)
 /PUBLISH_PLAN.md

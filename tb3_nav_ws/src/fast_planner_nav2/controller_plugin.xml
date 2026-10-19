@@ -1,0 +1,7 @@
+<library path="fast_planner_controller">
+  <class name="fast_planner_nav2::FastPlannerController"
+         type="fast_planner_nav2::FastPlannerController"
+         base_class_type="nav2_core::Controller">
+    <description>Third-party B-Spline geometry with differential-drive tracking and motion checks.</description>
+  </class>
+</library>
